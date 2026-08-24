@@ -1,4 +1,4 @@
-name: Build Gallery2 APK
+name: Build Gallery2 (AOSP Style)
 
 on:
   workflow_dispatch:
@@ -8,156 +8,100 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  build:
+  build-aosp:
     runs-on: ubuntu-latest
+    container:
+      image: ubuntu:20.04
 
     steps:
-      - name: Checkout Repository
+      - name: Install Build Dependencies
+        run: |
+          apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            openjdk-11-jdk \
+            git-core \
+            gnupg \
+            flex \
+            bison \
+            build-essential \
+            zip \
+            curl \
+            zlib1g-dev \
+            libc6-dev-i386 \
+            lib32ncurses5-dev \
+            x11proto-core-dev \
+            libx11-dev \
+            lib32z1-dev \
+            libgl1-mesa-dev \
+            libxml2-utils \
+            xsltproc \
+            unzip \
+            fontconfig
+
+      - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Set up JDK 11
-        uses: actions/setup-java@v4
         with:
-          java-version: '11'
-          distribution: 'temurin'
+          path: packages/apps/Gallery2
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      # 1. إعداد هيكلية المجلدات القياسية وتوفير AndroidManifest في المسار المتوقع
-      - name: Auto Structuring Folders
+      - name: Download Minimal AOSP Build Tools
         run: |
-          mkdir -p app/src/main
+          mkdir -p android-sdk
+          cd android-sdk
+          curl -s https://dl.google.com/android/repository/commandlinetools-linux-9441913_latest.zip -o sdk.zip
+          unzip -q sdk.zip
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+          yes | ./cmdline-tools/latest/bin/sdkmanager --licenses || true
+          ./cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3" "platforms;android-30"
+
+      - name: Build APK using AOSP Utilities
+        run: |
+          export ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk
+          export PATH=$ANDROID_HOME/build-tools/30.0.3:$PATH
+
+          cd packages/apps/Gallery2
+
+          # 1. تجميع الموارد (Resources)
+          aapt package -f -m \
+            -J src \
+            -M AndroidManifest.xml \
+            -S res \
+            -I $ANDROID_HOME/platforms/android-30/android.jar
+
+          # 2. تجميع أكواد Java
+          mkdir -p obj/classes
+          find src src_pd -name "*.java" > sources.txt
+          javac -d obj/classes \
+            -classpath $ANDROID_HOME/platforms/android-30/android.jar \
+            -source 1.8 -target 1.8 \
+            @sources.txt
+
+          # 3. تحويل الكود إلى Dex (D8 Compiler)
+          find obj/classes -name "*.class" > classes.txt
+          d8 --lib $ANDROID_HOME/platforms/android-30/android.jar \
+            --output ./ \
+            @classes.txt
+
+          # 4. دمج الـ Dex والموارد داخل APK غير موقع
+          aapt package -f \
+            -M AndroidManifest.xml \
+            -S res \
+            -I $ANDROID_HOME/platforms/android-30/android.jar \
+            -F Gallery2-unsigned.apk
+
+          aapt add Gallery2-unsigned.apk classes.dex
+
+          # 5. محاذاة وتوقيع الـ APK كمفتاح استخراج AOSP
+          zipalign -v 4 Gallery2-unsigned.apk Gallery2-aligned.apk
           
-          # نقل AndroidManifest.xml إلى المكان القياسي لـ Gradle
-          if [ -f "AndroidManifest.xml" ]; then
-            mv AndroidManifest.xml app/src/main/
-          elif [ -f "app/AndroidManifest.xml" ]; then
-            mv app/AndroidManifest.xml app/src/main/
-          fi
+          # توليد مفتاح توقيع تجريبي لبناء AOSP
+          keytool -genkeypair -validity 10000 -dname "CN=AOSP, OU=Android, O=Google, L=Mountain View, C=US" \
+            -keystore debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA
 
-          # نقل المجلدات البرمجية والحديثة لداخل app
-          [ -d "src" ] && mv src app/ || true
-          [ -d "src_pd" ] && mv src_pd app/ || true
-          [ -d "res" ] && mv res app/ || true
-          [ -f "proguard.flags" ] && mv proguard.flags app/ || true
+          apksigner sign --ks debug.keystore --ks-pass pass:android --key-pass pass:android \
+            --out Gallery2-aosp-debug.apk Gallery2-aligned.apk
 
-      # 2. تفعيل AndroidX والخصائص الأساسية
-      - name: Enable AndroidX Flags
-        run: |
-          echo "android.useAndroidX=true" > gradle.properties
-          echo "android.enableJetifier=true" >> gradle.properties
-          echo "org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m" >> gradle.properties
-
-      # 3. إنشاء ملفات إعداد Gradle وتحديد مسارات الكود الصحيحة
-      - name: Auto Generate Gradle Configuration Files
-        run: |
-          # settings.gradle
-          echo "rootProject.name = 'Gallery2'" > settings.gradle
-          echo "include ':app'" >> settings.gradle
-          [ -d "gallerycommon" ] && echo "include ':gallerycommon'" >> settings.gradle
-
-          # build.gradle الرئيسي
-          cat << 'EOF' > build.gradle
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:7.4.2'
-              }
-          }
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          EOF
-
-          # gallerycommon/build.gradle
-          if [ -d "gallerycommon" ]; then
-            cat << 'EOF' > gallerycommon/build.gradle
-          plugins {
-              id 'com.android.library'
-          }
-          android {
-              namespace 'com.android.gallery3d.common'
-              compileSdk 33
-              defaultConfig {
-                  minSdk 21
-                  targetSdk 33
-              }
-          }
-          EOF
-          fi
-
-          # app/build.gradle - توجيه المسارات لدعم المجلدات الحالية
-          cat << 'EOF' > app/build.gradle
-          plugins {
-              id 'com.android.application'
-          }
-          android {
-              namespace 'com.android.gallery3d'
-              compileSdk 33
-              defaultConfig {
-                  applicationId "com.android.gallery3d"
-                  minSdk 21
-                  targetSdk 33
-                  versionCode 1
-                  versionName "1.0"
-              }
-              
-              sourceSets {
-                  main {
-                      manifest.srcFile 'src/main/AndroidManifest.xml'
-                      java.srcDirs = ['src', 'src_pd']
-                      res.srcDirs = ['res']
-                  }
-              }
-
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                  }
-              }
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_11
-                  targetCompatibility JavaVersion.VERSION_11
-              }
-              lintOptions {
-                  checkReleaseBuilds false
-                  abortOnError false
-              }
-          }
-          dependencies {
-              implementation 'com.google.android.material:material:1.8.0'
-              implementation 'androidx.annotation:annotation:1.6.0'
-              implementation 'androidx.fragment:fragment:1.5.6'
-              implementation 'androidx.heifwriter:heifwriter:1.0.0'
-              implementation 'androidx.core:core:1.9.0'
-              implementation 'androidx.appcompat:appcompat:1.6.1'
-              if (project.findProject(':gallerycommon') != null) {
-                  implementation project(':gallerycommon')
-              }
-          }
-          EOF
-
-      # 4. تثبيت Gradle Wrapper
-      - name: Setup Gradle Wrapper
-        run: |
-          gradle wrapper --gradle-version 8.0.2
-          chmod +x gradlew
-
-      # 5. تشغيل البناء
-      - name: Build with Gradle
-        run: ./gradlew assembleDebug --stacktrace
-
-      # 6. رفع الـ APK
-      - name: Upload APK
+      - name: Upload AOSP Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Gallery2-APK
-          path: "**/build/outputs/apk/debug/*.apk"
-          if-no-files-found: error
+          name: Gallery2-AOSP-APK
+          path: packages/apps/Gallery2/Gallery2-aosp-debug.apk
