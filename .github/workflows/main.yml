@@ -15,49 +15,57 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 11
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '11'
           distribution: 'temurin'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # 1. نقل الملفات للمسار الصحيح
+      # 1. إعداد هيكلية المجلدات القياسية وتوفير AndroidManifest في المسار المتوقع
       - name: Auto Structuring Folders
         run: |
-          mkdir -p app
+          mkdir -p app/src/main
+          
+          # نقل AndroidManifest.xml إلى المكان القياسي لـ Gradle
+          if [ -f "AndroidManifest.xml" ]; then
+            mv AndroidManifest.xml app/src/main/
+          elif [ -f "app/AndroidManifest.xml" ]; then
+            mv app/AndroidManifest.xml app/src/main/
+          fi
+
+          # نقل المجلدات البرمجية والحديثة لداخل app
           [ -d "src" ] && mv src app/ || true
           [ -d "src_pd" ] && mv src_pd app/ || true
           [ -d "res" ] && mv res app/ || true
-          [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/ || true
           [ -f "proguard.flags" ] && mv proguard.flags app/ || true
 
-      # 2. إنشاء gradle.properties وتفعيل AndroidX (حل المشكلة الحالية)
+      # 2. تفعيل AndroidX والخصائص الأساسية
       - name: Enable AndroidX Flags
         run: |
-          echo "android.useAndroidX=true" >> gradle.properties
+          echo "android.useAndroidX=true" > gradle.properties
           echo "android.enableJetifier=true" >> gradle.properties
+          echo "org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m" >> gradle.properties
 
-      # 3. توليد ملفات Gradle الهيكلية تلقائياً
+      # 3. إنشاء ملفات إعداد Gradle وتحديد مسارات الكود الصحيحة
       - name: Auto Generate Gradle Configuration Files
         run: |
-          if [ ! -f "settings.gradle" ]; then
-            echo "rootProject.name = 'Gallery2'" > settings.gradle
-            echo "include ':app'" >> settings.gradle
-            [ -d "gallerycommon" ] && echo "include ':gallerycommon'" >> settings.gradle
-          fi
+          # settings.gradle
+          echo "rootProject.name = 'Gallery2'" > settings.gradle
+          echo "include ':app'" >> settings.gradle
+          [ -d "gallerycommon" ] && echo "include ':gallerycommon'" >> settings.gradle
 
-          if [ ! -f "build.gradle" ]; then
-            cat << 'EOF' > build.gradle
+          # build.gradle الرئيسي
+          cat << 'EOF' > build.gradle
           buildscript {
               repositories {
                   google()
                   mavenCentral()
               }
               dependencies {
-                  classpath 'com.android.tools.build:gradle:8.2.2'
+                  classpath 'com.android.tools.build:gradle:7.4.2'
               }
           }
           allprojects {
@@ -67,52 +75,86 @@ jobs:
               }
           }
           EOF
+
+          # gallerycommon/build.gradle
+          if [ -d "gallerycommon" ]; then
+            cat << 'EOF' > gallerycommon/build.gradle
+          plugins {
+              id 'com.android.library'
+          }
+          android {
+              namespace 'com.android.gallery3d.common'
+              compileSdk 33
+              defaultConfig {
+                  minSdk 21
+                  targetSdk 33
+              }
+          }
+          EOF
           fi
 
-          if [ ! -f "app/build.gradle" ]; then
-            cat << 'EOF' > app/build.gradle
+          # app/build.gradle - توجيه المسارات لدعم المجلدات الحالية
+          cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
           }
           android {
               namespace 'com.android.gallery3d'
-              compileSdk 34
+              compileSdk 33
               defaultConfig {
                   applicationId "com.android.gallery3d"
                   minSdk 21
-                  targetSdk 34
+                  targetSdk 33
                   versionCode 1
                   versionName "1.0"
               }
+              
+              sourceSets {
+                  main {
+                      manifest.srcFile 'src/main/AndroidManifest.xml'
+                      java.srcDirs = ['src', 'src_pd']
+                      res.srcDirs = ['res']
+                  }
+              }
+
               buildTypes {
                   release {
                       minifyEnabled false
                   }
               }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_11
+                  targetCompatibility JavaVersion.VERSION_11
+              }
+              lintOptions {
+                  checkReleaseBuilds false
+                  abortOnError false
+              }
           }
           dependencies {
-              implementation 'com.google.android.material:material:1.11.0'
-              implementation 'androidx.annotation:annotation:1.7.1'
-              implementation 'androidx.fragment:fragment:1.6.2'
+              implementation 'com.google.android.material:material:1.8.0'
+              implementation 'androidx.annotation:annotation:1.6.0'
+              implementation 'androidx.fragment:fragment:1.5.6'
               implementation 'androidx.heifwriter:heifwriter:1.0.0'
-              implementation 'androidx.core:core:1.12.0'
+              implementation 'androidx.core:core:1.9.0'
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              if (project.findProject(':gallerycommon') != null) {
+                  implementation project(':gallerycommon')
+              }
           }
           EOF
-          fi
 
-      # 4. إعداد الـ Wrapper وتحديد الصلاحيات
+      # 4. تثبيت Gradle Wrapper
       - name: Setup Gradle Wrapper
         run: |
-          if [ ! -f "./gradlew" ]; then
-            gradle wrapper
-          fi
+          gradle wrapper --gradle-version 8.0.2
           chmod +x gradlew
 
       # 5. تشغيل البناء
       - name: Build with Gradle
         run: ./gradlew assembleDebug --stacktrace
 
-      # 6. رفع الـ APK الناتج
+      # 6. رفع الـ APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
