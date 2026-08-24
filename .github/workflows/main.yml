@@ -24,18 +24,92 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # خطوة توليد ملفات Gradle المفقودة تلقائياً
+      # 1. نقل الملفات تلقائياً إذا لم تنقلها يدوعاً
+      - name: Auto Structuring Folders
+        run: |
+          mkdir -p app
+          [ -d "src" ] && mv src app/ || true
+          [ -d "src_pd" ] && mv src_pd app/ || true
+          [ -d "res" ] && mv res app/ || true
+          [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/ || true
+          [ -f "proguard.flags" ] && mv proguard.flags app/ || true
+
+      # 2. توليد ملفات Gradle الهيكلية المفقودة تلقائياً
+      - name: Auto Generate Gradle Configuration Files
+        run: |
+          # إنشاء settings.gradle
+          if [ ! -f "settings.gradle" ]; then
+            echo "rootProject.name = 'Gallery2'" > settings.gradle
+            echo "include ':app'" >> settings.gradle
+            [ -d "gallerycommon" ] && echo "include ':gallerycommon'" >> settings.gradle
+          fi
+
+          # إنشاء build.gradle الرئيسي
+          if [ ! -f "build.gradle" ]; then
+            cat << 'EOF' > build.gradle
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.2.2'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF
+          fi
+
+          # إنشاء app/build.gradle
+          if [ ! -f "app/build.gradle" ]; then
+            cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.android.gallery3d'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.android.gallery3d"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+          }
+          dependencies {
+              implementation 'com.google.android.material:material:1.11.0'
+              implementation 'androidx.annotation:annotation:1.7.1'
+              implementation 'androidx.fragment:fragment:1.6.2'
+              implementation 'androidx.heifwriter:heifwriter:1.0.0'
+              implementation 'androidx.core:core:1.12.0'
+          }
+          EOF
+          fi
+
+      # 3. إنشاء ملفات الـ Wrapper وتحديث الصلاحيات
       - name: Setup Gradle Wrapper
         run: |
           if [ ! -f "./gradlew" ]; then
-            echo "Gradlew not found. Generating wrapper..."
             gradle wrapper
           fi
           chmod +x gradlew
 
+      # 4. تنفيذ البناء
       - name: Build with Gradle
         run: ./gradlew assembleDebug --stacktrace
 
+      # 5. رفع الملف الناتج
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
