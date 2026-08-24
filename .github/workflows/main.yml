@@ -10,98 +10,72 @@ on:
 jobs:
   build-aosp:
     runs-on: ubuntu-latest
-    container:
-      image: ubuntu:20.04
 
     steps:
-      - name: Install Build Dependencies
-        run: |
-          apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            openjdk-11-jdk \
-            git-core \
-            gnupg \
-            flex \
-            bison \
-            build-essential \
-            zip \
-            curl \
-            zlib1g-dev \
-            libc6-dev-i386 \
-            lib32ncurses5-dev \
-            x11proto-core-dev \
-            libx11-dev \
-            lib32z1-dev \
-            libgl1-mesa-dev \
-            libxml2-utils \
-            xsltproc \
-            unzip \
-            fontconfig
-
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          path: packages/apps/Gallery2
 
-      - name: Download Minimal AOSP Build Tools
+      - name: Set up JDK 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+
+      # استخدام أداة أندرويد الجاهزة لتجنب أخطاء تنزيل sdk.zip
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android Build Tools
         run: |
-          mkdir -p android-sdk
-          cd android-sdk
-          curl -s https://dl.google.com/android/repository/commandlinetools-linux-9441913_latest.zip -o sdk.zip
-          unzip -q sdk.zip
-          mkdir -p cmdline-tools/latest
-          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
-          yes | ./cmdline-tools/latest/bin/sdkmanager --licenses || true
-          ./cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3" "platforms;android-30"
+          yes | sdkmanager "build-tools;30.0.3" "platforms;android-30"
 
       - name: Build APK using AOSP Utilities
         run: |
-          export ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk
-          export PATH=$ANDROID_HOME/build-tools/30.0.3:$PATH
-
-          cd packages/apps/Gallery2
+          # تحديد مسارات أدوات البناء
+          BUILD_TOOLS=$ANDROID_HOME/build-tools/30.0.3
+          PLATFORM=$ANDROID_HOME/platforms/android-30/android.jar
 
           # 1. تجميع الموارد (Resources)
-          aapt package -f -m \
+          $BUILD_TOOLS/aapt package -f -m \
             -J src \
             -M AndroidManifest.xml \
             -S res \
-            -I $ANDROID_HOME/platforms/android-30/android.jar
+            -I $PLATFORM
 
           # 2. تجميع أكواد Java
           mkdir -p obj/classes
-          find src src_pd -name "*.java" > sources.txt
+          find src src_pd -name "*.java" 2>/dev/null > sources.txt
           javac -d obj/classes \
-            -classpath $ANDROID_HOME/platforms/android-30/android.jar \
+            -classpath $PLATFORM \
             -source 1.8 -target 1.8 \
             @sources.txt
 
           # 3. تحويل الكود إلى Dex (D8 Compiler)
           find obj/classes -name "*.class" > classes.txt
-          d8 --lib $ANDROID_HOME/platforms/android-30/android.jar \
+          $BUILD_TOOLS/d8 --lib $PLATFORM \
             --output ./ \
             @classes.txt
 
           # 4. دمج الـ Dex والموارد داخل APK غير موقع
-          aapt package -f \
+          $BUILD_TOOLS/aapt package -f \
             -M AndroidManifest.xml \
             -S res \
-            -I $ANDROID_HOME/platforms/android-30/android.jar \
+            -I $PLATFORM \
             -F Gallery2-unsigned.apk
 
-          aapt add Gallery2-unsigned.apk classes.dex
+          $BUILD_TOOLS/aapt add Gallery2-unsigned.apk classes.dex
 
-          # 5. محاذاة وتوقيع الـ APK كمفتاح استخراج AOSP
-          zipalign -v 4 Gallery2-unsigned.apk Gallery2-aligned.apk
+          # 5. محاذاة وتوقيع الـ APK
+          $BUILD_TOOLS/zipalign -v 4 Gallery2-unsigned.apk Gallery2-aligned.apk
           
-          # توليد مفتاح توقيع تجريبي لبناء AOSP
           keytool -genkeypair -validity 10000 -dname "CN=AOSP, OU=Android, O=Google, L=Mountain View, C=US" \
             -keystore debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA
 
-          apksigner sign --ks debug.keystore --ks-pass pass:android --key-pass pass:android \
+          $BUILD_TOOLS/apksigner sign --ks debug.keystore --ks-pass pass:android --key-pass pass:android \
             --out Gallery2-aosp-debug.apk Gallery2-aligned.apk
 
       - name: Upload AOSP Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Gallery2-AOSP-APK
-          path: packages/apps/Gallery2/Gallery2-aosp-debug.apk
+          path: Gallery2-aosp-debug.apk
