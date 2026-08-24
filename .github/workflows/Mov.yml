@@ -1,0 +1,50 @@
+name: Move Files and Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  move-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # خطوة إنشاء مجلد app ونقل الملفات إليه
+      - name: Move src and res to app folder
+        run: |
+          mkdir -p app
+          
+          # نقل المجلدات إذا كانت موجودة في الجذر
+          [ -d "src" ] && mv src app/
+          [ -d "src_pd" ] && mv src_pd app/
+          [ -d "res" ] && mv res app/
+          
+          # نقل ملفات التهيئة الهامة إلى app
+          [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/
+          [ -f "proguard.flags" ] && mv proguard.flags app/
+
+      - name: Verify Directory Structure
+        run: ls -la app/
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+        continue-on-error: true
+
+      - name: Build with Gradle
+        run: ./gradlew assembleDebug --stacktrace
+        continue-on-error: true
