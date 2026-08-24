@@ -24,7 +24,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # 1. نقل الملفات تلقائياً إذا لم تنقلها يدوعاً
+      # 1. نقل الملفات للمسار الصحيح
       - name: Auto Structuring Folders
         run: |
           mkdir -p app
@@ -34,17 +34,21 @@ jobs:
           [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/ || true
           [ -f "proguard.flags" ] && mv proguard.flags app/ || true
 
-      # 2. توليد ملفات Gradle الهيكلية المفقودة تلقائياً
+      # 2. إنشاء gradle.properties وتفعيل AndroidX (حل المشكلة الحالية)
+      - name: Enable AndroidX Flags
+        run: |
+          echo "android.useAndroidX=true" >> gradle.properties
+          echo "android.enableJetifier=true" >> gradle.properties
+
+      # 3. توليد ملفات Gradle الهيكلية تلقائياً
       - name: Auto Generate Gradle Configuration Files
         run: |
-          # إنشاء settings.gradle
           if [ ! -f "settings.gradle" ]; then
             echo "rootProject.name = 'Gallery2'" > settings.gradle
             echo "include ':app'" >> settings.gradle
             [ -d "gallerycommon" ] && echo "include ':gallerycommon'" >> settings.gradle
           fi
 
-          # إنشاء build.gradle الرئيسي
           if [ ! -f "build.gradle" ]; then
             cat << 'EOF' > build.gradle
           buildscript {
@@ -65,7 +69,6 @@ jobs:
           EOF
           fi
 
-          # إنشاء app/build.gradle
           if [ ! -f "app/build.gradle" ]; then
             cat << 'EOF' > app/build.gradle
           plugins {
@@ -97,7 +100,7 @@ jobs:
           EOF
           fi
 
-      # 3. إنشاء ملفات الـ Wrapper وتحديث الصلاحيات
+      # 4. إعداد الـ Wrapper وتحديد الصلاحيات
       - name: Setup Gradle Wrapper
         run: |
           if [ ! -f "./gradlew" ]; then
@@ -105,11 +108,11 @@ jobs:
           fi
           chmod +x gradlew
 
-      # 4. تنفيذ البناء
+      # 5. تشغيل البناء
       - name: Build with Gradle
         run: ./gradlew assembleDebug --stacktrace
 
-      # 5. رفع الملف الناتج
+      # 6. رفع الـ APK الناتج
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
