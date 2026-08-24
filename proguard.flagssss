@@ -1,0 +1,59 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.android.gallery3d'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.android.gallery3d"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['../src', '../src_pd']
+            res.srcDirs = ['../res']
+            assets.srcDirs = ['../assets']
+            jniLibs.srcDirs = ['../libs']
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), '../proguard.flags'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    implementation project(':gallerycommon')
+    
+    // المكتبات المستخرجة من Android.bp
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.annotation:annotation:1.7.1'
+    implementation 'androidx.fragment:fragment:1.6.2'
+    implementation 'androidx.heifwriter:heifwriter:1.0.0'
+    implementation 'androidx.legacy:legacy-support-core-ui:1.0.0'
+    implementation 'androidx.core:core:1.12.0'
+    implementation 'androidx.legacy:legacy-support-v13:1.0.0'
+    
+    // المكتبات الخارجية
+    implementation 'org.gnu.inet:libxmp-java:5.1.0'
+    implementation 'org.mp4parser:isoparser:1.9.41'
+    
+    // الدعم للمكتبات القديمة
+    useLibrary 'org.apache.http.legacy'
+}
