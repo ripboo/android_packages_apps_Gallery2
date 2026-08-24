@@ -1,0 +1,23 @@
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'com.android.gallery3d.common'
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 21
+        targetSdk 34
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs = ['src']
+        }
+    }
+}
+
+dependencies {
+    compileOnly 'org.apache.httpcomponents:httpcore:4.4.16'
+}
