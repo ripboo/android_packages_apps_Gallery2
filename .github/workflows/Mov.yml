@@ -1,6 +1,9 @@
 name: Move Files and Build
 
 on:
+  # هذا السطر هو المسؤول عن إظهار زر "Run workflow" للذين يملكون الصلاحية
+  workflow_dispatch:
+
   push:
     branches: [ "main", "master" ]
   pull_request:
@@ -20,13 +23,13 @@ jobs:
           mkdir -p app
           
           # نقل المجلدات إذا كانت موجودة في الجذر
-          [ -d "src" ] && mv src app/
-          [ -d "src_pd" ] && mv src_pd app/
-          [ -d "res" ] && mv res app/
+          [ -d "src" ] && mv src app/ || echo "src not found"
+          [ -d "src_pd" ] && mv src_pd app/ || echo "src_pd not found"
+          [ -d "res" ] && mv res app/ || echo "res not found"
           
           # نقل ملفات التهيئة الهامة إلى app
-          [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/
-          [ -f "proguard.flags" ] && mv proguard.flags app/
+          [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/ || echo "AndroidManifest not found"
+          [ -f "proguard.flags" ] && mv proguard.flags app/ || echo "proguard.flags not found"
 
       - name: Verify Directory Structure
         run: ls -la app/
